@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Leitor de Código de Barras Completo</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f3f3f3;
+    text-align: center;
+    padding: 20px;
+  }
+  video {
+    width: 100%;
+    max-width: 400px;
+    border: 3px solid #555;
+    border-radius: 10px;
+  }
+  textarea {
+    width: 95%;
+    height: 100px;
+    font-size: 16px;
+    margin-top: 10px;
+  }
+  button, label {
+    margin: 8px;
+    padding: 10px 18px;
+    font-size: 16px;
+    border: none;
+    background-color: #007bff;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  label {
+    background-color: #28a745;
+    cursor: pointer;
+  }
+  #resultado {
+    background: white;
+    margin-top: 15px;
+    padding: 15px;
+    border-radius: 10px;
+  }
+</style>
+</head>
+<body>
+<h2>📱 Leitor de Códigos com Câmera — Versão Completa</h2>
+<p>Use a câmera do celular para ler códigos e salvar localmente.</p>
+
+<video id="preview"></video><br>
+
+<button onclick="iniciarLeitura('esperada')">1️⃣ Leitura Esperada</button>
+<button onclick="iniciarLeitura('verificada')">2️⃣ Leitura Verificada</button>
+<button onclick="comparar()">🔍 Comparar</button>
+<button onclick="limpar()">🧹 Limpar</button>
+
+<h3>Leituras:</h3>
+<textarea id="esperada" placeholder="Primeira leitura..."></textarea>
+<textarea id="verificada" placeholder="Segunda leitura..."></textarea>
+
+<br>
+<button onclick="exportarTXT()">💾 Exportar TXT</button>
+<label for="importarTXT" onclick="document.getElementById('importarTXT').click();">📁 Importar TXT</label>
+<input type="file" id="importarTXT" accept=".txt" style="display:none" onchange="importarTXT(event)">
+
+<div id="resultado"></div>
+
+<!-- Biblioteca QuaggaJS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<script>
+let modo = null;
+let codigosEsperados = JSON.parse(localStorage.getItem('esperada') || '[]');
+let codigosVerificados = JSON.parse(localStorage.getItem('verificada') || '[]');
+let quaggaStarted = false;
+
+document.getElementById('esperada').value = codigosEsperados.join('\n');
+document.getElementById('verificada').value = codigosVerificados.join('\n');
+
+function salvarLocal() {
+  localStorage.setItem('esperada', JSON.stringify(codigosEsperados));
+  localStorage.setItem('verificada', JSON.stringify(codigosVerificados));
+}
+
+function iniciarLeitura(tipo) {
+  modo = tipo;
+  document.getElementById('resultado').innerHTML =
+    `<b>Lendo ${tipo === 'esperada' ? 'primeira' : 'segunda'} lista...</b>`;
+
+  if (quaggaStarted) {
+    Quagga.stop();
+    quaggaStarted = false;
+  }
+
+  Quagga.init({
+    inputStream: {
+      name: "Live",
+      type: "LiveStream",
+      target: document.querySelector('#preview'),
+      constraints: {
+        facingMode: "environment"
+      }
+    },
+    decoder: {
+      readers: ["code_128_reader", "ean_reader", "ean_8_reader", "upc_reader"]
+    }
+  }, function(err) {
+    if (err) {
+      console.error(err);
+      alert("Erro ao acessar a câmera. Permita o acesso!");
+      return;
+    }
+    Quagga.start();
+    quaggaStarted = true;
+  });
+
+  Quagga.offDetected(); // Remove handlers antigos
+  Quagga.onDetected(function(result) {
+    const codigo = result.codeResult.code;
+    if (modo === 'esperada') {
+      if (!codigosEsperados.includes(codigo)) codigosEsperados.push(codigo);
+      document.getElementById('esperada').value = codigosEsperados.join('\n');
+    } else {
+      if (!codigosVerificados.includes(codigo)) codigosVerificados.push(codigo);
+      document.getElementById('verificada').value = codigosVerificados.join('\n');
+    }
+    salvarLocal();
+    if (navigator.vibrate) navigator.vibrate(80);
+  });
+}
+
+function comparar() {
+  const faltando = codigosEsperados.filter(c => !codigosVerificados.includes(c));
+  const aMais = codigosVerificados.filter(c => !codigosEsperados.includes(c));
+
+  let html = "<h3>📋 Resultado da comparação</h3>";
+
+  if (faltando.length === 0 && aMais.length === 0) {
+    html += `<p style="color:green"><b>Tudo certo!</b> Nenhum item faltando ou extra.</p>`;
+  } else {
+    if (faltando.length > 0) {
+      html += `<p><b style="color:red">Faltando (${faltando.length}):</b><br>${faltando.join('<br>')}</p>`;
+    }
+    if (aMais.length > 0) {
+      html += `<p><b style="color:orange">A mais (${aMais.length}):</b><br>${aMais.join('<br>')}</p>`;
+    }
+  }
+
+  document.getElementById('resultado').innerHTML = html;
+}
+
+function limpar() {
+  codigosEsperados = [];
+  codigosVerificados = [];
+  localStorage.clear();
+  document.getElementById('esperada').value = '';
+  document.getElementById('verificada').value = '';
+  document.getElementById('resultado').innerHTML = '';
+  if (quaggaStarted) Quagga.stop();
+  quaggaStarted = false;
+}
+
+function exportarTXT() {
+  const dados = {
+    esperada: codigosEsperados,
+    verificada: codigosVerificados
+  };
+  const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'dados_codigos.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importarTXT(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const dados = JSON.parse(e.target.result);
+      codigosEsperados = dados.esperada || [];
+      codigosVerificados = dados.verificada || [];
+      document.getElementById('esperada').value = codigosEsperados.join('\n');
+      document.getElementById('verificada').value = codigosVerificados.join('\n');
+      salvarLocal();
+      alert('✅ Dados importados com sucesso!');
+    } catch (erro) {
+      alert('❌ Arquivo inválido!');
+    }
+  };
+  reader.readAsText(file);
+}
+</script>
+</body>
+</html>
