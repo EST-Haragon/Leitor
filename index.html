@@ -45,8 +45,8 @@
 </style>
 </head>
 <body>
-<h2>📱 Leitor de Códigos com Câmera — Versão Completa</h2>
-<p>Use a câmera do celular para ler códigos e salvar localmente.</p>
+<h2>📱 Leitor de Códigos com Câmera — Versão Nota Fiscal</h2>
+<p>Use a câmera do celular para ler as notas e conferir se há faltas.</p>
 
 <video id="preview"></video><br>
 
@@ -61,7 +61,7 @@
 
 <br>
 <button onclick="exportarTXT()">💾 Exportar TXT</button>
-<label for="importarTXT" onclick="document.getElementById('importarTXT').click();">📁 Importar TXT</label>
+<label for="importarTXT">📁 Importar TXT</label>
 <input type="file" id="importarTXT" accept=".txt" style="display:none" onchange="importarTXT(event)">
 
 <div id="resultado"></div>
@@ -97,9 +97,7 @@ function iniciarLeitura(tipo) {
       name: "Live",
       type: "LiveStream",
       target: document.querySelector('#preview'),
-      constraints: {
-        facingMode: "environment"
-      }
+      constraints: { facingMode: "environment" }
     },
     decoder: {
       readers: ["code_128_reader", "ean_reader", "ean_8_reader", "upc_reader"]
@@ -114,17 +112,33 @@ function iniciarLeitura(tipo) {
     quaggaStarted = true;
   });
 
-  Quagga.offDetected(); // Remove handlers antigos
+  Quagga.offDetected();
   Quagga.onDetected(function(result) {
-    const codigo = result.codeResult.code;
+    const codigo = result.codeResult.code.trim();
+    let exibicao = codigo;
+    let numeroNota = null;
+
+    // Se for chave de NF-e (44 dígitos), extrai o número da nota
+    if (codigo.length === 44 && /^[0-9]+$/.test(codigo)) {
+      numeroNota = codigo.substring(22, 31);
+      exibicao = "NF: " + parseInt(numeroNota);
+    }
+
     if (modo === 'esperada') {
-      if (!codigosEsperados.includes(codigo)) codigosEsperados.push(codigo);
+      if (!codigosEsperados.includes(exibicao)) codigosEsperados.push(exibicao);
       document.getElementById('esperada').value = codigosEsperados.join('\n');
     } else {
-      if (!codigosVerificados.includes(codigo)) codigosVerificados.push(codigo);
+      if (!codigosVerificados.includes(exibicao)) codigosVerificados.push(exibicao);
       document.getElementById('verificada').value = codigosVerificados.join('\n');
     }
+
     salvarLocal();
+
+    document.getElementById('resultado').innerHTML =
+      numeroNota
+        ? `<p style="color:green"><b>Nota Fiscal detectada:</b> ${parseInt(numeroNota)}</p>`
+        : `<p style="color:blue"><b>Código comum lido:</b> ${codigo}</p>`;
+
     if (navigator.vibrate) navigator.vibrate(80);
   });
 }
