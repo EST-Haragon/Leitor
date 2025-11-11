@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Leitor de Códigos com Câmera — Versão Nota Fiscal (modificado)</title>
+<title>Leitor de Códigos com Câmera — Versão Nota Fiscal (PDF import)</title>
 <style>
   body {
     font-family: Arial, sans-serif;
@@ -12,11 +12,10 @@
     padding: 18px;
   }
 
-  /* Container do preview (Quagga injeta o vídeo internamente neste elemento) */
   #preview {
     width: 100%;
     max-width: 420px;
-    height: 320px; /* garante espaço visível no layout */
+    height: 320px;
     margin: 0 auto;
     border: 3px solid #555;
     border-radius: 10px;
@@ -25,7 +24,6 @@
     overflow: hidden;
   }
 
-  /* canvas de overlay (Quagga usa seu próprio canvas, mas mantemos estilo) */
   #preview canvas {
     width: 100% !important;
     height: 100% !important;
@@ -79,14 +77,24 @@
     justify-content: center;
   }
 
+  #pdfImportLabel {
+    background:#17a2b8;
+  }
+
   @media (min-width: 700px) {
     #preview { height: 420px; }
+  }
+
+  #progress {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #333;
   }
 </style>
 </head>
 <body>
 <h2>📱 Leitor de Códigos com Câmera — Versão Nota Fiscal</h2>
-<p>Use a câmera do celular para ler notas fiscais. Abra em localhost ou em uma URL com HTTPS para que a câmera funcione.</p>
+<p>Use a câmera do celular para ler notas fiscais ou importe PDFs contendo códigos para adicionar automaticamente à lista "esperada". Use em localhost ou HTTPS.</p>
 
 <div id="preview" aria-label="Área do preview da câmera"></div>
 
@@ -107,38 +115,44 @@
 <label for="importarTXT">📁 Importar TXT</label>
 <input type="file" id="importarTXT" accept=".txt" style="display:none" />
 
+<!-- Importar PDF -->
+<label for="importarPDF" id="pdfImportLabel">📄 Importar PDF</label>
+<input type="file" id="importarPDF" accept="application/pdf" style="display:none" />
+<div id="progress"></div>
+
 <div id="resultado"></div>
 
 <!-- Fallback video (mostrado apenas se Quagga não carregar, opcional) -->
 <video id="fallbackVideo" style="display:none; width:1px; height:1px;" autoplay muted playsinline></video>
 
-<!-- Biblioteca QuaggaJS (CDN). Se preferir, baixe localmente e sirva por HTTPS/localhost. -->
+<!-- Bibliotecas: Quagga (já usado) e pdf.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script>
 /*
-  Versão modificada:
-  - Usa um <div id="preview"> como target (Quagga injeta o vídeo internamente).
-  - Garante altura para o container para evitar 0x0.
-  - Verifica se o contexto é seguro (HTTPS / localhost).
-  - Faz uma verificação prévia de getUserMedia para capturar erros de permissão rapidamente.
-  - Mostra mensagens de erro claras no #resultado.
-  - Implementa stopScanning e limpeza apropriada.
-  - Mantém persistência em localStorage.
+  Funcionalidades adicionadas:
+  - importação de PDF (input importarPDF)
+  - renderização de cada página com pdf.js
+  - tentativa de detectar barcode via BarcodeDetector (nativo) quando disponível
+  - fallback para Quagga.decodeSingle quando BarcodeDetector não disponível
+  - adiciona todos os códigos encontrados à lista "esperada" (sem duplicatas)
 */
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
 const resultadoEl = document.getElementById('resultado');
 const previewEl = document.getElementById('preview');
+const progressEl = document.getElementById('progress');
 const fallbackVideo = document.getElementById('fallbackVideo');
 
-let modoActual = null; // 'esperada' ou 'verificada'
+let modoActual = null;
 let quaggaStarted = false;
 let codigosEsperados = JSON.parse(localStorage.getItem('esperada') || '[]');
 let codigosVerificados = JSON.parse(localStorage.getItem('verificada') || '[]');
-let lastDetected = { val: null, ts: 0 }; // evita leituras repetidas muito rápidas
+let lastDetected = { val: null, ts: 0 };
 
-document.getElementById('esperada').value = codigosEsperados.join('\\n');
-document.getElementById('verificada').value = codigosVerificados.join('\\n');
+document.getElementById('esperada').value = codigosEsperados.join('\n');
+document.getElementById('verificada').value = codigosVerificados.join('\n');
 
 function salvarLocal() {
   localStorage.setItem('esperada', JSON.stringify(codigosEsperados));
@@ -149,18 +163,21 @@ function setResultado(html) {
   resultadoEl.innerHTML = html;
 }
 
+function setProgress(text) {
+  progressEl.textContent = text || '';
+}
+
 function isSecureContextAvailable() {
   return (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
 }
 
+/* Funções existentes para câmera e Quagga (mantidas) */
 function ensureCameraAccessTest() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return Promise.reject(new Error('API navigator.mediaDevices.getUserMedia não disponível neste navegador.'));
   }
-  // Solicita acesso brevemente só para verificar permissões/disponibilidade.
   return navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
     .then(stream => {
-      // encerra imediatamente os tracks (Quagga fará a captura depois)
       stream.getTracks().forEach(t => t.stop());
       return Promise.resolve();
     });
@@ -177,16 +194,12 @@ function iniciarLeitura(tipo) {
 
   if (typeof Quagga === 'undefined') {
     setResultado('<div class="warning">Biblioteca Quagga não carregou. Verifique conexão com CDN ou hospede quagga.localmente.</div>');
-    // tentar mostrar fallback de vídeo só para o usuário ver a câmera (opcional)
     startFallbackVideo();
     return;
   }
 
-  // checagem de permissão/disp. de câmera antes de inicializar Quagga
   ensureCameraAccessTest()
-    .then(() => {
-      startQuagga();
-    })
+    .then(() => startQuagga())
     .catch(err => {
       console.error('getUserMedia ERRO (pré-teste):', err);
       setResultado(`<div class="warning">Erro ao acessar a câmera: ${err && err.message ? err.message : err}. Verifique permissões do site.</div>`);
@@ -194,13 +207,13 @@ function iniciarLeitura(tipo) {
 }
 
 function startQuagga() {
-  stopScanning(); // garante estado limpo
+  stopScanning();
 
   Quagga.init({
     inputStream: {
       name: "Live",
       type: "LiveStream",
-      target: previewEl, // Quagga injeta o vídeo aqui
+      target: previewEl,
       constraints: {
         facingMode: "environment",
         width: { min: 640 },
@@ -208,15 +221,17 @@ function startQuagga() {
       }
     },
     decoder: {
-      readers: ["code_128_reader", "ean_reader", "ean_8_reader", "upc_reader"]
+      readers: [
+        "code_128_reader","ean_reader","ean_8_reader","upc_reader","upc_e_reader",
+        "code_39_reader","i2of5_reader","codabar_reader"
+      ]
     },
-    locate: true, // tenta localizar o barcode no frame
+    locate: true,
     numOfWorkers: navigator.hardwareConcurrency ? Math.max(1, Math.min(4, navigator.hardwareConcurrency - 1)) : 2
   }, function(err) {
     if (err) {
       console.error('Quagga init error:', err);
       setResultado(`<div class="warning">Erro ao iniciar Quagga: ${err.message || err}</div>`);
-      // opcional: iniciar fallback de vídeo
       startFallbackVideo();
       return;
     }
@@ -225,12 +240,10 @@ function startQuagga() {
     setResultado('<b>Scanner ativo. Aponte a câmera para o código.</b>');
   });
 
-  // desenha caixas no canvas de overlay (ajuda visual)
   Quagga.onProcessed(function(result) {
     const drawingCtx = Quagga.canvas && Quagga.canvas.ctx && Quagga.canvas.ctx.overlay;
     const drawingCanvas = Quagga.canvas && Quagga.canvas.dom && Quagga.canvas.dom.overlay;
     if (!drawingCtx || !drawingCanvas) return;
-
     drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 
     if (result) {
@@ -239,11 +252,9 @@ function startQuagga() {
           Quagga.ImageDebug.drawPath(box, {x:0, y:0}, drawingCtx, {color: "rgba(255,255,255,0.3)", lineWidth: 2});
         });
       }
-
       if (result.box) {
         Quagga.ImageDebug.drawPath(result.box, {x:0, y:0}, drawingCtx, {color: "#00F", lineWidth: 3});
       }
-
       if (result.codeResult && result.codeResult.code) {
         Quagga.ImageDebug.drawPath(result.line, {x: 'x', y: 'y'}, drawingCtx, {color: "red", lineWidth: 3});
       }
@@ -257,26 +268,23 @@ function startQuagga() {
 function handleDetected(result) {
   if (!result || !result.codeResult || !result.codeResult.code) return;
   const codigo = result.codeResult.code.trim();
-
-  // evita leituras repetidas no curto prazo (200 ms)
   const now = Date.now();
   if (lastDetected.val === codigo && (now - lastDetected.ts) < 250) return;
   lastDetected = { val: codigo, ts: now };
 
   let exibicao = codigo;
   let numeroNota = null;
-
   if (codigo.length === 44 && /^[0-9]+$/.test(codigo)) {
-    numeroNota = codigo.substring(22, 31); // extrai número da nota
+    const numeroNota = codigo.substring(25, 34);
     exibicao = "NF: " + parseInt(numeroNota, 10);
   }
 
   if (modoActual === 'esperada') {
     if (!codigosEsperados.includes(exibicao)) codigosEsperados.push(exibicao);
-    document.getElementById('esperada').value = codigosEsperados.join('\\n');
+    document.getElementById('esperada').value = codigosEsperados.join('\n');
   } else {
     if (!codigosVerificados.includes(exibicao)) codigosVerificados.push(exibicao);
-    document.getElementById('verificada').value = codigosVerificados.join('\\n');
+    document.getElementById('verificada').value = codigosVerificados.join('\n');
   }
 
   salvarLocal();
@@ -292,15 +300,10 @@ function handleDetected(result) {
 
 function stopScanning() {
   if (typeof Quagga !== 'undefined' && quaggaStarted) {
-    try {
-      Quagga.stop();
-    } catch (e) {
-      console.warn('Erro ao parar Quagga:', e);
-    }
+    try { Quagga.stop(); } catch (e) { console.warn('Erro ao parar Quagga:', e); }
     quaggaStarted = false;
   }
   stopFallbackVideo();
-  // limpa canvas overlay (se existir)
   if (typeof Quagga !== 'undefined' && Quagga.canvas && Quagga.canvas.dom && Quagga.canvas.dom.overlay) {
     const overlay = Quagga.canvas.dom.overlay;
     if (overlay && overlay.getContext) {
@@ -321,7 +324,6 @@ function limpar() {
   stopScanning();
 }
 
-/* Fallback: mostra somente a câmera no <video> se Quagga não estiver disponível */
 function startFallbackVideo() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     setResultado('<div class="warning">getUserMedia não suportado. Não é possível acessar a câmera.</div>');
@@ -332,7 +334,6 @@ function startFallbackVideo() {
       fallbackVideo.srcObject = stream;
       fallbackVideo.style.display = 'block';
       fallbackVideo.setAttribute('playsinline', '');
-      // reposiciona o video dentro do preview para visualização simples
       previewEl.innerHTML = '';
       previewEl.appendChild(fallbackVideo);
     })
@@ -347,12 +348,11 @@ function stopFallbackVideo() {
     (fallbackVideo.srcObject.getTracks() || []).forEach(t => t.stop());
     fallbackVideo.srcObject = null;
     fallbackVideo.style.display = 'none';
-    // restaura preview vazio (Quagga injeta quando inicia)
     previewEl.innerHTML = '';
   }
 }
 
-/* Comparar listas */
+/* Comparar / Export / Import (TXT) */
 function comparar() {
   const faltando = codigosEsperados.filter(c => !codigosVerificados.includes(c));
   const aMais = codigosVerificados.filter(c => !codigosEsperados.includes(c));
@@ -373,7 +373,6 @@ function comparar() {
   setResultado(html);
 }
 
-/* Export / Import */
 function exportarTXT() {
   const dados = { esperada: codigosEsperados, verificada: codigosVerificados };
   const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'text/plain' });
@@ -394,8 +393,8 @@ function importarTXT(event) {
       const dados = JSON.parse(e.target.result);
       codigosEsperados = dados.esperada || [];
       codigosVerificados = dados.verificada || [];
-      document.getElementById('esperada').value = codigosEsperados.join('\\n');
-      document.getElementById('verificada').value = codigosVerificados.join('\\n');
+      document.getElementById('esperada').value = codigosEsperados.join('\n');
+      document.getElementById('verificada').value = codigosVerificados.join('\n');
       salvarLocal();
       alert('✅ Dados importados com sucesso!');
     } catch (erro) {
@@ -405,7 +404,115 @@ function importarTXT(event) {
   reader.readAsText(file);
 }
 
-/* Botões e eventos */
+/* ==== NOVA FUNÇÃO: Importar PDF e detectar códigos ==== */
+async function importarPDFFile(file) {
+  if (!file) return;
+  setProgress('Carregando PDF...');
+  setResultado('');
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    const total = pdf.numPages;
+    setProgress(`Processando PDF: ${total} página(s). Isso pode levar alguns segundos...`);
+
+    const foundCodes = []; // códigos detectados neste import
+
+    for (let i = 1; i <= total; i++) {
+      setProgress(`Renderizando página ${i} / ${total}...`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 }); // escala mais alta para melhor detecção
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext('2d');
+
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+      // Primeiro tentar BarcodeDetector (nativo e geralmente mais rápido)
+      let detectedOnPage = [];
+      if (window.BarcodeDetector) {
+        try {
+          // tenta vários formatos comuns
+          const formats = ['code_128', 'ean_13', 'ean_8', 'upc_e', 'upc_a', 'code_39', 'itf', 'codabar', 'pdf417', 'qr_code'];
+          const supported = await BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : formats;
+          // filtra formats por supported quando possível
+          const detectorFormats = (Array.isArray(supported) && supported.length) ? supported : formats;
+          const detector = new BarcodeDetector({ formats: detectorFormats });
+          const barcodes = await detector.detect(canvas);
+          detectedOnPage = (barcodes || []).map(b => (b.rawValue || b.displayValue || '').trim()).filter(Boolean);
+        } catch (err) {
+          console.warn('BarcodeDetector erro:', err);
+          detectedOnPage = [];
+        }
+      }
+
+      // Se não encontrou via BarcodeDetector, tenta Quagga.decodeSingle (fallback)
+      if (detectedOnPage.length === 0) {
+        try {
+          setProgress(`Detectando (Quagga) na página ${i}...`);
+          // converte canvas para dataURL
+          const dataUrl = canvas.toDataURL('image/png');
+          const qResult = await new Promise(resolve => {
+            Quagga.decodeSingle({
+              src: dataUrl,
+              numOfWorkers: 0, // decodeSingle roda no main thread
+              decoder: {
+                readers: [
+                  "code_128_reader","ean_reader","ean_8_reader","upc_reader","upc_e_reader",
+                  "code_39_reader","i2of5_reader","codabar_reader"
+                ]
+              },
+              locate: true
+            }, function(result) {
+              resolve(result);
+            });
+          });
+          if (qResult && qResult.codeResult && qResult.codeResult.code) {
+            detectedOnPage = [qResult.codeResult.code.trim()];
+          }
+        } catch (err) {
+          console.warn('Quagga decodeSingle erro:', err);
+        }
+      }
+
+      // Adiciona encontrados (evita duplicatas)
+      detectedOnPage.forEach(code => {
+        if (!code) return;
+        // transforma chave NF-e em "NF:nnn" para manter consistência com leitura por câmera
+        let exibicao = code;
+        if (/^[0-9]{44}$/.test(code)) {
+          const numeroNota = code.substring(25, 34);
+          exibicao = 'NF: ' + parseInt(numeroNota, 10);
+        }
+        if (!foundCodes.includes(exibicao) && !codigosEsperados.includes(exibicao)) {
+          foundCodes.push(exibicao);
+          codigosEsperados.push(exibicao);
+        }
+      });
+
+      // libera canvas
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+
+    salvarLocal();
+    document.getElementById('esperada').value = codigosEsperados.join('\n');
+
+    if (foundCodes.length > 0) {
+      setResultado(`<p style="color:green"><b>Códigos importados do PDF:</b><br>${foundCodes.join('<br>')}</p>`);
+    } else {
+      setResultado('<p style="color:orange"><b>Nenhum código detectado no PDF.</b> Tente aumentar a escala ou verificar se o PDF contém imagens legíveis dos códigos.</p>');
+    }
+    setProgress('');
+  } catch (err) {
+    console.error('Erro ao processar PDF:', err);
+    setResultado(`<div class="warning">Erro ao importar PDF: ${err && err.message ? err.message : err}</div>`);
+    setProgress('');
+  }
+}
+
+/* Event listeners */
 document.getElementById('btnEsperada').addEventListener('click', () => iniciarLeitura('esperada'));
 document.getElementById('btnVerificada').addEventListener('click', () => iniciarLeitura('verificada'));
 document.getElementById('btnParar').addEventListener('click', () => {
@@ -416,15 +523,27 @@ document.getElementById('btnComparar').addEventListener('click', comparar);
 document.getElementById('btnLimpar').addEventListener('click', limpar);
 document.getElementById('btnExport').addEventListener('click', exportarTXT);
 document.getElementById('importarTXT').addEventListener('change', importarTXT);
+document.getElementById('importarPDF').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  importarPDFFile(file);
+});
 
-/* Se o usuário recarregar/fechar, parar a câmera */
+/* Label clicks to open file dialogs */
+document.getElementById('pdfImportLabel').addEventListener('click', () => {
+  document.getElementById('importarPDF').click();
+});
+document.querySelector('label[for="importarTXT"]').addEventListener('click', () => {
+  document.getElementById('importarTXT').click();
+});
+
+/* parar câmera ao fechar página */
 window.addEventListener('beforeunload', () => {
   stopScanning();
 });
 
-/* Test rápido no carregamento: se não seguro, avisa imediatamente */
 if (!isSecureContextAvailable()) {
-  setResultado('<div class="warning">Atenção: testando em contexto inseguro. Use HTTPS ou localhost para habilitar a câmera.</div>');
+  setResultado('<div class="warning">Atenção: execute em HTTPS ou localhost para acessar a câmera. A importação de PDF funciona localmente sem HTTPS.</div>');
 }
 </script>
 </body>
