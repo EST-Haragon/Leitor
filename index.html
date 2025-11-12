@@ -4,126 +4,235 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Leitor & Reconciliação — NF / Etiquetas</title>
+
+<!-- Bootstrap 5 CSS (CDN) -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
 <style>
-  body { font-family: Arial, sans-serif; background:#f3f3f3; padding:18px; text-align:center; }
-  #preview { width:100%; max-width:480px; height:320px; margin:10px auto; border:3px solid #555; border-radius:8px; background:#000; overflow:hidden; }
+  /* Pequenas customizações além do Bootstrap */
+  #preview {
+    width: 100%;
+    max-width: 100%;
+    height: 320px;
+    margin: 0 auto;
+    border: 3px solid #495057;
+    border-radius: 8px;
+    background: #000;
+    overflow: hidden;
+    position: relative;
+  }
   #preview canvas { width:100% !important; height:100% !important; }
-  .controls{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin:8px 0; }
-  button,label{ margin:6px; padding:10px 14px; border:none; border-radius:8px; background:#007bff; color:#fff; cursor:pointer; }
-  label{ background:#28a745; }
-  input[type="text"], select, input[type="date"]{ padding:8px; font-size:14px; border-radius:6px; border:1px solid #ccc; }
-  textarea{ width:95%; height:90px; margin-top:8px; font-size:14px; resize:vertical; }
-  #resultado{ background:#fff; padding:12px; border-radius:8px; min-height:50px; margin-top:10px; text-align:left; max-width:980px; margin-left:auto; margin-right:auto; }
-  .small { font-size:13px; color:#555; }
-  .warning{ color:#a94442; background:#f9e2e2; padding:8px; border-radius:6px; display:inline-block; margin-bottom:8px; }
-  .topbar{ display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
-  .stats { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
-  .stat { background:#fff; padding:8px 10px; border-radius:8px; min-width:140px; text-align:center; }
-  .stat b{ display:block; font-size:18px; }
-  #progress{ font-size:13px; color:#333; margin-top:6px; }
-  .muted{ color:#666; font-size:13px; }
+  #fallbackVideo { width:100%; height:100%; object-fit:cover; display:block; }
+  .muted { color:#6c757d; }
+  .small-muted { font-size:0.9rem; color:#6c757d; }
+  .stat { min-width:120px; }
+  .file-label { cursor:pointer; }
+  .controls-wrap { gap:.5rem; flex-wrap:wrap; }
+  pre.report-json { max-height: 320px; overflow:auto; background:#f8f9fa; padding:12px; border-radius:6px; }
 </style>
 </head>
 <body>
-<h2>📦 Leitor & Reconciliação — NF / Etiquetas</h2>
-<p class="small">Use em localhost ou HTTPS. Crie um lote (por loja), importe notas (PDF/TXT) ou faça leitura por câmera. Registra operador e gera relatório final do dia.</p>
+<div class="container py-3">
+  <header class="mb-3">
+    <h2 class="mb-1">📦 Leitor & Reconciliação — NF / Etiquetas</h2>
+    <p class="small-muted mb-0">Use em localhost ou HTTPS. Meninas importam PDFs com notas; meninos fazem conferência por leitura. Gera relatório final e histórico de incidentes.</p>
+  </header>
 
-<div class="topbar">
-  <label for="storeInput">Loja</label>
-  <select id="storeSelect"></select>
-  <input type="text" id="newStore" placeholder="Nova loja..." />
-  <button id="addStoreBtn">➕ Adicionar loja</button>
+  <!-- Top: lojas, operador e criação de lote -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <form class="row g-2 align-items-center" onsubmit="return false;">
+        <div class="col-auto">
+          <label for="storeSelect" class="form-label">Loja</label>
+          <select id="storeSelect" class="form-select"></select>
+        </div>
+        <div class="col-auto">
+          <label for="newStore" class="form-label">Nova loja</label>
+          <input id="newStore" class="form-control" placeholder="Nome da loja" />
+        </div>
+        <div class="col-auto align-self-end">
+          <button id="addStoreBtn" class="btn btn-outline-success">➕ Adicionar loja</button>
+        </div>
 
-  <label for="operatorInput">Operador</label>
-  <input type="text" id="operatorInput" placeholder="Nome do operador" />
+        <div class="col-auto">
+          <label for="operatorInput" class="form-label">Operador</label>
+          <input id="operatorInput" class="form-control" placeholder="Nome do operador" />
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label for="batchName" class="form-label">Nome do lote / expedição</label>
+          <input id="batchName" class="form-control" placeholder="Ex.: Shopee - 2025-11-12 - Expedicao A" />
+        </div>
+
+        <div class="col-auto align-self-end">
+          <button id="createBatchBtn" class="btn btn-primary">🗂️ Criar/Selecionar Lote</button>
+        </div>
+
+        <div class="col-12">
+          <div id="currentBatch" class="small-muted mt-2">Nenhum lote selecionado</div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Preview + Controls -->
+  <div class="row mb-3">
+    <div class="col-12 col-lg-6 mb-3 mb-lg-0">
+      <div id="preview" class="mb-2" aria-label="Área do preview da câmera"></div>
+
+      <div class="d-flex controls-wrap">
+        <button id="btnEsperada" class="btn btn-outline-primary">1️⃣ Leitura Esperada</button>
+        <button id="btnVerificada" class="btn btn-outline-success">2️⃣ Leitura Verificada</button>
+        <button id="btnParar" class="btn btn-outline-danger">⏹ Parar</button>
+        <button id="btnRegistrarCheck" class="btn btn-info text-white">📝 Registrar verificação atual</button>
+        <button id="btnComparar" class="btn btn-secondary">🔍 Comparar</button>
+        <button id="btnLimpar" class="btn btn-dark">🧹 Limpar listas</button>
+      </div>
+
+      <div id="progress" class="small-muted mt-2"></div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+      <div class="row g-2">
+        <div class="col-12">
+          <div class="d-flex gap-2 flex-wrap">
+            <div class="card stat text-center">
+              <div class="card-body p-2">
+                <div class="small-muted">Esperada</div>
+                <div class="h4 mb-0" id="statEsperada">0</div>
+              </div>
+            </div>
+
+            <div class="card stat text-center">
+              <div class="card-body p-2">
+                <div class="small-muted">Verificada</div>
+                <div class="h4 mb-0" id="statVerificada">0</div>
+              </div>
+            </div>
+
+            <div class="card stat text-center">
+              <div class="card-body p-2">
+                <div class="small-muted">Faltando (final)</div>
+                <div class="h4 mb-0" id="statFaltando">0</div>
+              </div>
+            </div>
+
+            <div class="card stat text-center">
+              <div class="card-body p-2">
+                <div class="small-muted">Sobrando (final)</div>
+                <div class="h4 mb-0" id="statSobrando">0</div>
+              </div>
+            </div>
+
+            <div class="card stat text-center">
+              <div class="card-body p-2">
+                <div class="small-muted">Incidentes hoje</div>
+                <div class="h4 mb-0" id="statIncidentes">0</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Leituras - Esperada</label>
+          <textarea id="esperada" class="form-control" placeholder="Lista esperada (NF/etiquetas)"></textarea>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Leituras - Verificada</label>
+          <textarea id="verificada" class="form-control" placeholder="Lista verificada (scanner)"></textarea>
+        </div>
+
+        <div class="col-12 d-flex gap-2">
+          <button id="btnExport" class="btn btn-outline-secondary">💾 Exportar TXT</button>
+
+          <label class="btn btn-outline-primary file-label mb-0">
+            📁 Importar TXT
+            <input id="importarTXT" type="file" accept=".txt" hidden>
+          </label>
+
+          <label class="btn btn-outline-info file-label mb-0">
+            📄 Importar PDF
+            <input id="importarPDF" type="file" accept="application/pdf" hidden>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Relatórios -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label for="reportDate" class="form-label">Data do relatório</label>
+          <input id="reportDate" type="date" class="form-control" />
+        </div>
+
+        <div class="col-auto">
+          <button id="generateReportBtn" class="btn btn-success">📊 Gerar relatório do dia</button>
+        </div>
+
+        <div class="col-auto">
+          <button id="exportReportBtn" class="btn btn-secondary">📤 Exportar relatório (JSON)</button>
+        </div>
+      </div>
+
+      <div id="resultado" class="mt-3"></div>
+    </div>
+  </div>
+
+  <!-- Hidden fallback video -->
+  <video id="fallbackVideo" autoplay muted playsinline style="display:none;"></video>
 </div>
 
-<div style="margin:8px auto; max-width:980px;">
-  <label for="batchName">Nome do lote/expedição</label>
-  <input type="text" id="batchName" placeholder="Ex.: Shopee - 2025-11-12 - Expedicao A" style="width:40%;" />
-  <button id="createBatchBtn">🗂️ Criar/Selecionar Lote</button>
-  <div id="currentBatch" class="muted" style="margin-top:8px;"></div>
-</div>
-
-<div id="preview" aria-label="Área do preview da câmera"></div>
-
-<div class="controls">
-  <button id="btnEsperada">1️⃣ Leitura Esperada (adiciona)</button>
-  <button id="btnVerificada">2️⃣ Leitura Verificada (confirma)</button>
-  <button id="btnParar" style="background:#dc3545">⏹ Parar</button>
-  <button id="btnComparar">🔍 Comparar (visual)</button>
-  <button id="btnRegistrarCheck" style="background:#17a2b8">📝 Registrar verificação atual</button>
-  <button id="btnLimpar" style="background:#6c757d">🧹 Limpar lista atual</button>
-</div>
-
-<div class="stats" id="statsArea">
-  <div class="stat"><span class="muted">Esperada</span><b id="statEsperada">0</b></div>
-  <div class="stat"><span class="muted">Verificada</span><b id="statVerificada">0</b></div>
-  <div class="stat"><span class="muted">Faltando (final)</span><b id="statFaltando">0</b></div>
-  <div class="stat"><span class="muted">Sobrando (final)</span><b id="statSobrando">0</b></div>
-  <div class="stat"><span class="muted">Incidentes hoje</span><b id="statIncidentes">0</b></div>
-</div>
-
-<h3>Leituras:</h3>
-<textarea id="esperada" placeholder="Lista esperada (NF/etiquetas)"></textarea>
-<textarea id="verificada" placeholder="Lista verificada (scanner)"></textarea>
-
-<br>
-<button id="btnExport">💾 Exportar TXT</button>
-<label for="importarTXT">📁 Importar TXT</label>
-<input type="file" id="importarTXT" accept=".txt" style="display:none" />
-
-<label for="importarPDF" style="background:#17a2b8">📄 Importar PDF</label>
-<input type="file" id="importarPDF" accept="application/pdf" style="display:none" />
-<div id="progress"></div>
-
-<div style="margin-top:16px; text-align:center;">
-  <label for="reportDate">Data do relatório</label>
-  <input type="date" id="reportDate" />
-  <button id="generateReportBtn" style="background:#28a745">📊 Gerar relatório do dia</button>
-  <button id="exportReportBtn" style="background:#6f42c1">📤 Exportar relatório (JSON)</button>
-</div>
-
-<div id="resultado"></div>
-
-<!-- Fallback video -->
-<video id="fallbackVideo" style="display:none; width:1px; height:1px;" autoplay muted playsinline></video>
-
-<!-- libs -->
+<!-- Quagga + pdf.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<!-- Bootstrap JS bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-/* Configs e estruturas em localStorage:
-  - stores: [nomeLoja]
-  - batches: [{id, name, store, operator, createdAt}]
-  - data_<batchId>: {esperada:[], verificada:[]}
-  - events: [{batchId, store, operator, type, code, display, ts}]
-  - incidentsIndex: {dateYYYY-MM-DD: { codesWithIncidents: Set(...) }}  // opcional, recomputed
-  - reports: [{date, summary, detail}]
+/* Bootstrap-based version - mantém funcionalidades:
+   - lojas, operador, lotes (batches)
+   - import PDF detecta códigos e adiciona como esperada
+   - câmera + Quagga para leitura esperada/verificada
+   - eventos persistidos em localStorage para incident reporting
+   - relatório manual e export JSON
 */
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-const resultadoEl = document.getElementById('resultado');
+/* LocalStorage keys:
+   stores -> [string]
+   batches -> [{id,name,store,operator,createdAt}]
+   events -> [{batchId,store,operator,type,code,display,ts}]
+   data_<batchId> -> {esperada:[], verificada:[]}
+   reports -> [{date,ts,summary,detail}]
+*/
+
 const previewEl = document.getElementById('preview');
-const progressEl = document.getElementById('progress');
 const fallbackVideo = document.getElementById('fallbackVideo');
+const resultadoEl = document.getElementById('resultado');
+const progressEl = document.getElementById('progress');
+
+let stores = JSON.parse(localStorage.getItem('stores') || '[]');
+let batches = JSON.parse(localStorage.getItem('batches') || '[]');
+let events = JSON.parse(localStorage.getItem('events') || '[]');
+let reports = JSON.parse(localStorage.getItem('reports') || '[]');
 
 let currentBatchId = null;
 let quaggaStarted = false;
 let lastDetected = {val:null, ts:0};
+let currentMode = null; // 'esperada' | 'verificada'
 
-// estados carregados
-let stores = JSON.parse(localStorage.getItem('stores') || '[]');
-let batches = JSON.parse(localStorage.getItem('batches') || '[]');
-let events = JSON.parse(localStorage.getItem('events') || '[]'); // histórico de eventos
-let reports = JSON.parse(localStorage.getItem('reports') || '[]');
-
-// inicializa UI
+/* UI elements */
 const storeSelect = document.getElementById('storeSelect');
+const newStoreInput = document.getElementById('newStore');
+const addStoreBtn = document.getElementById('addStoreBtn');
 const operatorInput = document.getElementById('operatorInput');
 const batchNameInput = document.getElementById('batchName');
+const createBatchBtn = document.getElementById('createBatchBtn');
 const currentBatchDiv = document.getElementById('currentBatch');
 
 function saveAll() {
@@ -133,35 +242,29 @@ function saveAll() {
   localStorage.setItem('reports', JSON.stringify(reports));
 }
 
-function loadBatchData(batchId) {
-  const key = 'data_' + batchId;
-  return JSON.parse(localStorage.getItem(key) || JSON.stringify({esperada:[], verificada:[]}));
-}
-function saveBatchData(batchId, data) {
-  localStorage.setItem('data_' + batchId, JSON.stringify(data));
-}
-
 function refreshStoreSelect() {
   storeSelect.innerHTML = '';
   stores.forEach(s => {
-    const opt = document.createElement('option'); opt.value = s; opt.textContent = s;
+    const opt = document.createElement('option'); opt.value = s; opt.text = s;
     storeSelect.appendChild(opt);
   });
-  const optOther = document.createElement('option'); optOther.value=''; optOther.textContent='-- outra --';
+  const optOther = document.createElement('option'); optOther.value=''; optOther.text='-- outra --';
   storeSelect.appendChild(optOther);
 }
 refreshStoreSelect();
 
-document.getElementById('addStoreBtn').addEventListener('click', () => {
-  const name = document.getElementById('newStore').value.trim();
+addStoreBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  const name = newStoreInput.value.trim();
   if (!name) { alert('Informe o nome da loja.'); return; }
   if (!stores.includes(name)) { stores.push(name); saveAll(); refreshStoreSelect(); }
-  document.getElementById('newStore').value = '';
+  newStoreInput.value = '';
 });
 
-document.getElementById('createBatchBtn').addEventListener('click', () => {
+createBatchBtn.addEventListener('click', (e) => {
+  e.preventDefault();
   const name = batchNameInput.value.trim();
-  const store = storeSelect.value || (document.getElementById('newStore').value.trim() || null);
+  const store = storeSelect.value || (newStoreInput.value.trim() || null);
   const operator = operatorInput.value.trim() || null;
   if (!name || !store) { alert('Informe nome do lote e selecione/adicione a loja.'); return; }
   const id = 'batch_' + Date.now();
@@ -174,36 +277,33 @@ document.getElementById('createBatchBtn').addEventListener('click', () => {
   alert('Lote criado e selecionado: ' + name);
 });
 
+function saveBatchData(batchId, data) {
+  localStorage.setItem('data_' + batchId, JSON.stringify(data));
+}
+function loadBatchData(batchId) {
+  return JSON.parse(localStorage.getItem('data_' + batchId) || JSON.stringify({esperada:[], verificada:[]}));
+}
+
 function updateCurrentBatchUI() {
-  if (!currentBatchId) {
-    currentBatchDiv.textContent = 'Nenhum lote selecionado';
-    return;
-  }
+  if (!currentBatchId) { currentBatchDiv.textContent = 'Nenhum lote selecionado'; updateStats(); return; }
   const b = batches.find(x => x.id === currentBatchId);
   currentBatchDiv.textContent = `Lote: ${b.name} — Loja: ${b.store} — Operador: ${b.operator || '—'} — Criado: ${new Date(b.createdAt).toLocaleString()}`;
-  // carregar listas no textarea
   const data = loadBatchData(currentBatchId);
   document.getElementById('esperada').value = data.esperada.join('\\n');
   document.getElementById('verificada').value = data.verificada.join('\\n');
   updateStats();
 }
 
-// selecionar último batch criado se existir
-if (batches.length) {
-  currentBatchId = batches[batches.length - 1].id;
-  updateCurrentBatchUI();
-}
-
-// ----- helpers de evento -----
+/* push event */
 function pushEvent(ev) {
   events.push(ev);
   saveAll();
-  updateStats(); // recalcula incident counters
+  updateStats();
 }
 
-// adiciona esperado/ verificado (string exibicao já):
+/* add expected/verified */
 function addExpected(display) {
-  if (!currentBatchId) { alert('Selecione/crie um lote antes.'); return; }
+  if (!currentBatchId) { alert('Crie/seleccione um lote antes.'); return; }
   const data = loadBatchData(currentBatchId);
   if (!data.esperada.includes(display)) {
     data.esperada.push(display);
@@ -215,14 +315,13 @@ function addExpected(display) {
 }
 
 function addVerified(display) {
-  if (!currentBatchId) { alert('Selecione/crie um lote antes.'); return; }
+  if (!currentBatchId) { alert('Crie/seleccione um lote antes.'); return; }
   const data = loadBatchData(currentBatchId);
   if (!data.verificada.includes(display)) {
     data.verificada.push(display);
     saveBatchData(currentBatchId, data);
     document.getElementById('verificada').value = data.verificada.join('\\n');
     pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value || null, type:'add_verified', code:display, display, ts: new Date().toISOString() });
-    // se verificado não estava na esperada -> incidente "sobrou"
     if (!data.esperada.includes(display)) {
       pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value || null, type:'incident_extra', code:display, display, ts: new Date().toISOString() });
     }
@@ -230,29 +329,28 @@ function addVerified(display) {
   updateStats();
 }
 
-// registrar manualmente check (snapshot de faltas no momento) -> marca incident_missing para cada faltante naquele momento
+/* snapshot check: mark missing incidents at the moment */
 function recordCheckSnapshot() {
-  if (!currentBatchId) { alert('Selecione/crie um lote antes.'); return; }
+  if (!currentBatchId) { alert('Crie/seleccione um lote antes.'); return; }
   const data = loadBatchData(currentBatchId);
   const faltando = data.esperada.filter(x => !data.verificada.includes(x));
   faltando.forEach(code => {
     pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value || null, type:'incident_missing', code, display:code, ts: new Date().toISOString() });
   });
-  setResultado(`<p>Snapshot registrado: ${faltando.length} item(ns) marcados como faltantes neste lote.</p>`);
-  updateStats();
+  setResultado(`<div class="alert alert-info">Snapshot registrado: ${faltando.length} item(ns) marcados como faltantes neste lote.</div>`);
 }
 
-// limpar listas do lote atual (não apaga histórico de eventos)
+/* clear lists of current batch (keeps events) */
 function clearCurrentLists() {
-  if (!currentBatchId) { alert('Selecione/crie um lote antes.'); return; }
+  if (!currentBatchId) { alert('Crie/seleccione um lote antes.'); return; }
   saveBatchData(currentBatchId, {esperada:[], verificada:[]});
   document.getElementById('esperada').value = '';
   document.getElementById('verificada').value = '';
-  setResultado('<p>Listas do lote limpas (o histórico de eventos permanece).</p>');
+  setResultado('<div class="alert alert-warning">Listas do lote limpas (o histórico de eventos permanece).</div>');
   updateStats();
 }
 
-// atualiza estatísticas e contador de incidentes (hoje)
+/* stats update */
 function updateStats() {
   if (!currentBatchId) {
     document.getElementById('statEsperada').textContent = '0';
@@ -272,17 +370,17 @@ function updateStats() {
   document.getElementById('statFaltando').textContent = faltandoFinal.length;
   document.getElementById('statSobrando').textContent = sobrandoFinal.length;
 
-  // incidentes do dia (únicos) -> contamos eventos incident_missing + incident_extra do dia atual
   const today = new Date().toISOString().slice(0,10);
   const todaysIncidents = events.filter(e => (e.type === 'incident_missing' || e.type === 'incident_extra') && e.ts.slice(0,10) === today && e.batchId === currentBatchId);
   const uniqueIncidentCodes = new Set(todaysIncidents.map(i=>i.code));
   document.getElementById('statIncidentes').textContent = uniqueIncidentCodes.size;
 }
 
-// ---- Quagga / camera (mantido do código anterior) ----
+/* Camera & Quagga */
 function isSecureContextAvailable() {
   return (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
 }
+
 function ensureCameraAccessTest() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return Promise.reject(new Error('API navigator.mediaDevices.getUserMedia não disponível.'));
@@ -293,15 +391,15 @@ function ensureCameraAccessTest() {
 
 function startQuagga() {
   stopScanning();
-  if (typeof Quagga === 'undefined') { setResultado('Quagga não carregou.'); return; }
+  if (typeof Quagga === 'undefined') { setResultado('<div class="alert alert-danger">Quagga não carregou.</div>'); return; }
   Quagga.init({
     inputStream: { name:'Live', type:'LiveStream', target: previewEl, constraints:{ facingMode:'environment', width:{min:640}, height:{min:480} } },
     decoder: { readers: ["code_128_reader","ean_reader","ean_8_reader","upc_reader","upc_e_reader","code_39_reader","i2of5_reader","codabar_reader"] },
     locate:true,
     numOfWorkers: navigator.hardwareConcurrency ? Math.max(1, Math.min(4, navigator.hardwareConcurrency-1)) : 2
   }, function(err){
-    if (err){ console.error('Quagga init error:',err); setResultado('Erro ao iniciar scanner: '+(err.message||err)); return; }
-    Quagga.start(); quaggaStarted = true; setResultado('<b>Scanner ativo</b>');
+    if (err){ console.error('Quagga init error:',err); setResultado('<div class="alert alert-danger">Erro ao iniciar scanner: '+(err.message||err)+'</div>'); startFallbackVideo(); return; }
+    Quagga.start(); quaggaStarted = true; setResultado('<div class="alert alert-success">Scanner ativo</div>');
   });
 
   Quagga.offDetected();
@@ -312,64 +410,56 @@ function startQuagga() {
     if (lastDetected.val === codigo && (now - lastDetected.ts) < 250) return;
     lastDetected = {val:codigo, ts:now};
 
-    // formata display (NF: if 44-digit)
     let display = codigo;
     if (/^[0-9]{44}$/.test(codigo)) {
-      const numeroNota = codigo.substring(25,34);
-      display = 'NF:' + parseInt(numeroNota,10);
+      display = 'NF:' + parseInt(codigo.substring(25,34),10);
     }
 
-    // se modo atual for esperado ou verificado, adiciona
-    if (currentMode === 'esperada') {
-      addExpected(display);
-    } else if (currentMode === 'verificada') {
-      addVerified(display);
-    }
-
-    // a cada detecção, também registra incident_missing para faltantes no momento (opcional leve)
-    // Aqui não marcamos faltantes automaticamente a cada scan para não poluir; o botão "Registrar verificação atual" é recomendado.
+    if (currentMode === 'esperada') addExpected(display);
+    else if (currentMode === 'verificada') addVerified(display);
   });
 }
 
 function stopScanning() {
   if (typeof Quagga !== 'undefined' && quaggaStarted) {
-    try { Quagga.stop(); } catch(e){ console.warn(e); }
+    try { Quagga.stop(); } catch(e) { console.warn(e); }
     quaggaStarted = false;
   }
   if (fallbackVideo && fallbackVideo.srcObject) {
-    (fallbackVideo.srcObject.getTracks()||[]).forEach(t=>t.stop());
+    (fallbackVideo.srcObject.getTracks() || []).forEach(t=>t.stop());
     fallbackVideo.srcObject = null;
     fallbackVideo.style.display = 'none';
     previewEl.innerHTML = '';
   }
 }
 
-// fallback video (se Quagga falhar)
 function startFallbackVideo() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setResultado('getUserMedia não suportado.');
+    setResultado('<div class="alert alert-danger">getUserMedia não suportado.</div>');
     return;
   }
-  navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } })
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
     .then(stream => {
-      fallbackVideo.srcObject = stream; fallbackVideo.style.display='block'; previewEl.innerHTML=''; previewEl.appendChild(fallbackVideo);
+      fallbackVideo.srcObject = stream;
+      fallbackVideo.style.display = 'block';
+      previewEl.innerHTML = '';
+      previewEl.appendChild(fallbackVideo);
     })
-    .catch(err => { console.error(err); setResultado('Não foi possível abrir câmera: '+err.message); });
+    .catch(err => { console.error(err); setResultado('<div class="alert alert-danger">Não foi possível abrir câmera: '+err.message+'</div>'); });
 }
 
-// modo de leitura
-let currentMode = null;
+/* UI button handlers */
 document.getElementById('btnEsperada').addEventListener('click', () => {
   currentMode = 'esperada';
-  if (!isSecureContextAvailable()) { setResultado('<div class="warning">Use HTTPS/localhost para câmera.</div>'); return; }
-  ensureCameraAccessTest().then(()=> startQuagga()).catch(err=> setResultado('Erro acesso câmera: '+err.message));
+  if (!isSecureContextAvailable()) { setResultado('<div class="alert alert-warning">Use HTTPS/localhost para câmera.</div>'); return; }
+  ensureCameraAccessTest().then(()=> startQuagga()).catch(err=> setResultado('<div class="alert alert-danger">Erro acesso câmera: '+err.message+'</div>'));
 });
 document.getElementById('btnVerificada').addEventListener('click', () => {
   currentMode = 'verificada';
-  if (!isSecureContextAvailable()) { setResultado('<div class="warning">Use HTTPS/localhost para câmera.</div>'); return; }
-  ensureCameraAccessTest().then(()=> startQuagga()).catch(err=> setResultado('Erro acesso câmera: '+err.message));
+  if (!isSecureContextAvailable()) { setResultado('<div class="alert alert-warning">Use HTTPS/localhost para câmera.</div>'); return; }
+  ensureCameraAccessTest().then(()=> startQuagga()).catch(err=> setResultado('<div class="alert alert-danger">Erro acesso câmera: '+err.message+'</div>'));
 });
-document.getElementById('btnParar').addEventListener('click', () => { stopScanning(); setResultado('Scanner parado.'); });
+document.getElementById('btnParar').addEventListener('click', () => { stopScanning(); setResultado('<div class="alert alert-secondary">Scanner parado.</div>'); });
 document.getElementById('btnRegistrarCheck').addEventListener('click', () => recordCheckSnapshot());
 document.getElementById('btnLimpar').addEventListener('click', () => clearCurrentLists());
 document.getElementById('btnComparar').addEventListener('click', () => {
@@ -377,13 +467,13 @@ document.getElementById('btnComparar').addEventListener('click', () => {
   const data = loadBatchData(currentBatchId);
   const faltando = data.esperada.filter(x=>!data.verificada.includes(x));
   const aMais = data.verificada.filter(x=>!data.esperada.includes(x));
-  let html = '<h3>Resultado da comparação</h3>';
+  let html = '<h5>Resultado da comparação</h5>';
   html += `<p><b>Faltando (${faltando.length}):</b><br>${faltando.join('<br>') || '—'}</p>`;
   html += `<p><b>A mais (${aMais.length}):</b><br>${aMais.join('<br>') || '—'}</p>`;
   setResultado(html);
 });
 
-// Export / Import TXT
+/* Export / Import TXT */
 document.getElementById('btnExport').addEventListener('click', () => {
   if (!currentBatchId) { alert('Selecione um lote.'); return; }
   const data = loadBatchData(currentBatchId);
@@ -392,40 +482,37 @@ document.getElementById('btnExport').addEventListener('click', () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'dados_lote_' + currentBatchId + '.txt'; a.click(); URL.revokeObjectURL(url);
 });
+
 document.getElementById('importarTXT').addEventListener('change', (e) => {
   const f = e.target.files[0]; if (!f) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const obj = JSON.parse(ev.target.result);
-      if (obj.esperada || obj.verificada) { // formato antigo
+      if ((obj.esperada || obj.verificada) || (obj.data && obj.batchId)) {
         if (!currentBatchId) { alert('Crie/seleccione um lote antes de importar.'); return; }
         const data = loadBatchData(currentBatchId);
-        data.esperada = Array.from(new Set([...data.esperada, ...(obj.esperada||[])]));
-        data.verificada = Array.from(new Set([...data.verificada, ...(obj.verificada||[])]));
+        if (obj.esperada) data.esperada = Array.from(new Set([...data.esperada, ...(obj.esperada||[])]));
+        if (obj.verificada) data.verificada = Array.from(new Set([...data.verificada, ...(obj.verificada||[])]));
+        if (obj.data) {
+          data.esperada = Array.from(new Set([...data.esperada, ...(obj.data.esperada||[])]));
+          data.verificada = Array.from(new Set([...data.verificada, ...(obj.data.verificada||[])]));
+        }
         saveBatchData(currentBatchId, data);
         document.getElementById('esperada').value = data.esperada.join('\\n');
         document.getElementById('verificada').value = data.verificada.join('\\n');
         data.esperada.forEach(d=> pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value||null, type:'add_expected', code:d, display:d, ts:new Date().toISOString() }));
         data.verificada.forEach(d=> pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value||null, type:'add_verified', code:d, display:d, ts:new Date().toISOString() }));
-        setResultado('Importado TXT para lote atual.');
-      } else if (obj.data && obj.batchId) {
-        // import de export anterior
-        if (!currentBatchId) { alert('Selecione/crie um lote antes de importar.'); return; }
-        const data = loadBatchData(currentBatchId);
-        data.esperada = Array.from(new Set([...data.esperada, ...obj.data.esperada]));
-        data.verificada = Array.from(new Set([...data.verificada, ...obj.data.verificada]));
-        saveBatchData(currentBatchId, data);
-        setResultado('Dados importados no lote atual.');
+        setResultado('<div class="alert alert-success">Importado TXT para lote atual.</div>');
       } else {
-        setResultado('Arquivo TXT inválido.');
+        setResultado('<div class="alert alert-danger">Arquivo TXT inválido.</div>');
       }
-    } catch(err) { setResultado('Erro importando TXT: ' + err.message); }
+    } catch(err) { setResultado('<div class="alert alert-danger">Erro importando TXT: ' + err.message + '</div>'); }
   };
   reader.readAsText(f);
 });
 
-// PDF import (mantido do código anterior, adiciona ao lote como esperada automaticamente)
+/* PDF import: render pages and detect with BarcodeDetector or Quagga decodeSingle */
 document.getElementById('importarPDF').addEventListener('change', async (e) => {
   const file = e.target.files[0]; if (!file) return;
   if (!currentBatchId) { alert('Crie/seleccione um lote antes de importar PDF.'); return; }
@@ -447,13 +534,11 @@ document.getElementById('importarPDF').addEventListener('change', async (e) => {
       const ctx = canvas.getContext('2d');
       await page.render({ canvasContext: ctx, viewport }).promise;
 
-      // BarcodeDetector nativo
       let detectedOnPage = [];
       if (window.BarcodeDetector) {
         try {
           const formats = ['code_128','ean_13','ean_8','upc_e','upc_a','code_39','itf','codabar','pdf417','qr_code'];
-          const detectorFormats = formats;
-          const detector = new BarcodeDetector({ formats: detectorFormats });
+          const detector = new BarcodeDetector({ formats });
           const barcodes = await detector.detect(canvas);
           detectedOnPage = (barcodes||[]).map(b => (b.rawValue || b.displayValue || '').trim()).filter(Boolean);
         } catch(err) { console.warn('BarcodeDetector err',err); }
@@ -481,42 +566,44 @@ document.getElementById('importarPDF').addEventListener('change', async (e) => {
         }
         if (!foundCodes.includes(display)) foundCodes.push(display);
       });
+
       canvas.width = 0; canvas.height = 0;
     }
 
-    // adiciona encontrados à esperada do lote e registra eventos
     const data = loadBatchData(currentBatchId);
-    foundCodes.forEach(d => { if (!data.esperada.includes(d)) { data.esperada.push(d); pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value||null, type:'add_expected', code:d, display:d, ts:new Date().toISOString() }); } });
+    foundCodes.forEach(d => {
+      if (!data.esperada.includes(d)) {
+        data.esperada.push(d);
+        pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value||null, type:'add_expected', code:d, display:d, ts:new Date().toISOString() });
+      }
+    });
     saveBatchData(currentBatchId, data);
     document.getElementById('esperada').value = data.esperada.join('\\n');
-    setResultado(`<p style="color:green">Importados do PDF: ${foundCodes.length} código(s).</p>`);
+    setResultado(`<div class="alert alert-success">Importados do PDF: ${foundCodes.length} código(s).</div>`);
     setProgress('');
   } catch(err) {
     console.error(err);
-    setResultado('Erro ao processar PDF: ' + err.message);
+    setResultado('<div class="alert alert-danger">Erro ao processar PDF: ' + (err.message||err) + '</div>');
     setProgress('');
   }
 });
 
-function setResultado(html) { resultadoEl.innerHTML = html; }
-function setProgress(t) { progressEl.textContent = t || ''; }
-
-// Report generation (manual) — por data (YYYY-MM-DD)
+/* Report generation (manual) */
 document.getElementById('generateReportBtn').addEventListener('click', () => {
   const date = document.getElementById('reportDate').value || (new Date().toISOString().slice(0,10));
   const report = generateDailyReport(date);
-  // mostra no UI
-  let html = `<h3>Relatório para ${date}</h3>`;
+  let html = `<h5>Relatório para ${date}</h5>`;
   html += `<p><b>Total esperada (únicos):</b> ${report.totalEsperada}</p>`;
   html += `<p><b>Total verificada (únicos):</b> ${report.totalVerificada}</p>`;
   html += `<p><b>Faltando (final):</b> ${report.faltando.length}</p>`;
   html += `<p><b>Sobrando (final):</b> ${report.sobrando.length}</p>`;
-  html += `<p><b>Incidentes (faltou) únicos durante o dia:</b> ${report.incidentesFaltou.length}</p>`;
-  html += `<p><b>Incidentes (sobrou) únicos durante o dia:</b> ${report.incidentesSobrou.length}</p>`;
-  html += `<details><summary>Faltando (lista)</summary><div>${report.faltando.join('<br>') || '—'}</div></details>`;
-  html += `<details><summary>Sobrando (lista)</summary><div>${report.sobrando.join('<br>') || '—'}</div></details>`;
+  html += `<p><b>Incidentes (faltou) únicos:</b> ${report.incidentesFaltou.length}</p>`;
+  html += `<p><b>Incidentes (sobrou) únicos:</b> ${report.incidentesSobrou.length}</p>`;
+  html += `<details><summary>Faltando (lista)</summary><div class="mt-2">${report.faltando.join('<br>') || '—'}</div></details>`;
+  html += `<details><summary>Sobrando (lista)</summary><div class="mt-2">${report.sobrando.join('<br>') || '—'}</div></details>`;
   setResultado(html);
-  // salvar snapshot em reports (opcional)
+
+  // salvar snapshot no histórico de reports
   reports.push({ date, ts: new Date().toISOString(), summary: { totalEsperada:report.totalEsperada, totalVerificada:report.totalVerificada, faltando:report.faltando.length, sobrando:report.sobrando.length, incidentesFaltou:report.incidentesFaltou.length, incidentesSobrou:report.incidentesSobrou.length }, detail: report });
   saveAll();
 });
@@ -529,13 +616,9 @@ document.getElementById('exportReportBtn').addEventListener('click', () => {
   const a = document.createElement('a'); a.href = url; a.download = `report_${date}.json`; a.click(); URL.revokeObjectURL(url);
 });
 
-// gera relatório para a data: considera todos os batches criados nessa data (e eventos do dia)
 function generateDailyReport(dateYYYYMMDD) {
-  // eventos do dia
   const eventsDay = events.filter(e => e.ts.slice(0,10) === dateYYYYMMDD);
-  // batches envolvidos no dia (criados nesse dia OR with events)
   const batchIds = new Set(eventsDay.map(e=>e.batchId));
-  // Também inclui batches que foram criados nesse dia
   batches.forEach(b => { if (b.createdAt.slice(0,10) === dateYYYYMMDD) batchIds.add(b.id); });
 
   const report = { date: dateYYYYMMDD, batches: {}, totalEsperada:0, totalVerificada:0, faltando:[], sobrando:[], incidentesFaltou:[], incidentesSobrou:[] };
@@ -545,11 +628,8 @@ function generateDailyReport(dateYYYYMMDD) {
     const data = loadBatchData(batchId);
     const esperadaSet = new Set(data.esperada);
     const verificadaSet = new Set(data.verificada);
-
     const faltandoFinal = Array.from(esperadaSet).filter(x => !verificadaSet.has(x));
     const sobrandoFinal = Array.from(verificadaSet).filter(x => !esperadaSet.has(x));
-
-    // incidentes no dia: eventos incident_missing/incident_extra
     const inciFaltou = new Set(eventsDay.filter(e=>e.batchId===batchId && e.type==='incident_missing').map(e=>e.code));
     const inciSobrou = new Set(eventsDay.filter(e=>e.batchId===batchId && e.type==='incident_extra').map(e=>e.code));
 
@@ -564,7 +644,6 @@ function generateDailyReport(dateYYYYMMDD) {
       events: eventsDay.filter(e=>e.batchId===batchId)
     };
 
-    // agregar ao resumo
     report.totalEsperada += esperadaSet.size;
     report.totalVerificada += verificadaSet.size;
     report.faltando.push(...faltandoFinal);
@@ -573,7 +652,6 @@ function generateDailyReport(dateYYYYMMDD) {
     report.incidentesSobrou.push(...Array.from(inciSobrou));
   });
 
-  // Uniques
   report.faltando = Array.from(new Set(report.faltando));
   report.sobrando = Array.from(new Set(report.sobrando));
   report.incidentesFaltou = Array.from(new Set(report.incidentesFaltou));
@@ -581,26 +659,29 @@ function generateDailyReport(dateYYYYMMDD) {
   return report;
 }
 
-// input label clicks
-document.querySelector('label[for="importarTXT"]').addEventListener('click', ()=> document.getElementById('importarTXT').click());
-document.querySelector('label[for="importarPDF"]').addEventListener('click', ()=> document.getElementById('importarPDF').click());
+/* small helpers */
+function setResultado(html) { resultadoEl.innerHTML = html; }
+function setProgress(text) { progressEl.textContent = text || ''; }
 
-// ao recarregar, atualizar stats
+/* on load: select last batch if exists */
 window.addEventListener('load', () => {
-  // se batches existir, pre-seleciona último
+  refreshStoreSelect();
   if (batches.length && !currentBatchId) { currentBatchId = batches[batches.length-1].id; }
   updateCurrentBatchUI();
+  if (!isSecureContextAvailable()) {
+    setResultado('<div class="alert alert-warning">Atenção: a câmera funciona apenas em HTTPS ou localhost. Importação de PDF funciona localmente.</div>');
+  }
 });
 
-// salvar quando textarea alterada manualmente
+/* save when user edits textareas manually */
 document.getElementById('esperada').addEventListener('change', () => {
   if (!currentBatchId) return;
   const data = loadBatchData(currentBatchId);
   data.esperada = document.getElementById('esperada').value.split('\\n').map(s=>s.trim()).filter(Boolean);
   saveBatchData(currentBatchId, data);
-  // registra eventos de adição (simplificado)
   data.esperada.forEach(d => pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value||null, type:'add_expected', code:d, display:d, ts:new Date().toISOString() }));
 });
+
 document.getElementById('verificada').addEventListener('change', () => {
   if (!currentBatchId) return;
   const data = loadBatchData(currentBatchId);
@@ -609,13 +690,15 @@ document.getElementById('verificada').addEventListener('change', () => {
   data.verificada.forEach(d => pushEvent({ batchId: currentBatchId, store: batches.find(b=>b.id===currentBatchId).store, operator: operatorInput.value||null, type:'add_verified', code:d, display:d, ts:new Date().toISOString() }));
 });
 
-// Atualiza UI de stores sempre que alterar lista global
-window.addEventListener('storage', () => { stores = JSON.parse(localStorage.getItem('stores') || '[]'); batches = JSON.parse(localStorage.getItem('batches') || '[]'); events = JSON.parse(localStorage.getItem('events') || '[]'); refreshStoreSelect(); });
+/* storage event to update UI when another tab changes localStorage */
+window.addEventListener('storage', () => {
+  stores = JSON.parse(localStorage.getItem('stores') || '[]');
+  batches = JSON.parse(localStorage.getItem('batches') || '[]');
+  events = JSON.parse(localStorage.getItem('events') || '[]');
+  refreshStoreSelect();
+});
 
-// mensagem inicial sobre segurança
-if (!isSecureContextAvailable()) {
-  setResultado('<div class="warning">Atenção: a câmera funciona apenas em HTTPS ou localhost. Importação de PDF funciona localmente.</div>');
-}
+/* End of script */
 </script>
 </body>
 </html>
